@@ -1,7 +1,18 @@
 import csv
+import json
 import os
+from pathlib import Path
 
 import numpy as np
+
+
+CALIBRATION = json.loads(
+    (Path(__file__).with_name("calibrated_params.json")).read_text(encoding="utf-8")
+)["parameters"]
+CALIBRATED_HOME_ADVANTAGE = float(CALIBRATION["home_advantage"])
+CALIBRATED_K_FACTOR = float(CALIBRATION["k_factor"])
+CALIBRATED_TOTAL_GOALS = float(CALIBRATION["total_goals"])
+CALIBRATED_MARGIN_WEIGHT = float(CALIBRATION["margin_weight"])
 
 E={'PSG':1953,'Bayern':2045,'Real Madrid':1973,'Liverpool':1931,'Inter':1945,'Man City':2028,'Arsenal':2039,'Barcelona':2017,'Atletico':1888,'Dortmund':1894,'Roma':1852,'Sporting':1882,'Aston Villa':1891,'Porto':1827,'Man United':1888,'Club Brugge':1802,'Real Betis':1811,'PSV':1790,'Feyenoord':1707,'Lille':1784,'Bodo':1786,'Napoli':1832,'Leipzig':1818,'Villarreal':1795,'Fenerbahce':1778,'Shakhtar':1685,'Galatasaray':1805,'Slavia':1756,'Slovan':1555,'Stuttgart':1831,'AEK':1707,'LASK':1644,'Como':1815,'Lens':1822,'Viking':1687,'Sabah':1561}
 PRESEASON=E.copy()
@@ -195,11 +206,12 @@ fixed.update(md4)
 # four matchdays in order. Recent rounds get moderately larger K values and the
 # update is scaled by margin of victory (capped to prevent one result dominating).
 E=PRESEASON.copy()
-for round_results,k in zip((md1,md2,md3,md4),(20,24,30,36)):
+round_k_factors=tuple(CALIBRATED_K_FACTOR*scale for scale in (0.625,0.75,0.9375,1.125))
+for round_results,k in zip((md1,md2,md3,md4),round_k_factors):
  for (h,a),(hg,ag) in round_results.items():
   expected=1/(1+10**(-(E[h]+65-E[a])/400))
   actual=1.0 if hg>ag else (0.5 if hg==ag else 0.0)
-  margin=min(2.35,1+0.55*np.log1p(abs(hg-ag))) if hg!=ag else 1.0
+  margin=min(2.35,1+CALIBRATED_MARGIN_WEIGHT*np.log1p(abs(hg-ag))) if hg!=ag else 1.0
   delta=k*margin*(actual-expected)
   E[h]+=delta; E[a]-=delta
 
@@ -209,7 +221,7 @@ gf_obs={t:0 for t in E}; ga_obs={t:0 for t in E}
 for (h,a),(hg,ag) in fixed.items():
  gf_obs[h]+=hg; ga_obs[h]+=ag; gf_obs[a]+=ag; ga_obs[a]+=hg
 observed_total=sum(gf_obs.values())/len(fixed)
-base_total=0.55*3.05+0.45*observed_total
+base_total=0.55*CALIBRATED_TOTAL_GOALS+0.45*observed_total
 mu=observed_total/2; prior_matches=6
 attack={t:((gf_obs[t]+prior_matches*mu)/(4+prior_matches))/mu for t in E}
 defence={t:((ga_obs[t]+prior_matches*mu)/(4+prior_matches))/mu for t in E}
@@ -252,7 +264,8 @@ for z in range(0,N,bs):
  sim_def=DEF[None,:]*np.exp(rng.normal(0,0.08,(n,36)))
  rows=np.arange(n)
 
- def sample_match(home,away,home_adv=65,factor=1.0):
+ def sample_match(home,away,home_adv=None,factor=1.0):
+  if home_adv is None: home_adv=CALIBRATED_HOME_ADVANTAGE
   gap=sim_power[rows,home]+home_adv-sim_power[rows,away]
   ratio=10**(gap/400)
   lh=base_total*ratio/(1+ratio)*(sim_att[rows,home]*sim_def[rows,away])**0.32*factor

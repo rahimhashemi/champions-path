@@ -1,0 +1,13 @@
+= Test season
+
+▪ League, Matchday 1
+
+Tue Sep 1 2026
+18:45 Alpha FC (ENG) v Beta FC (ESP) 2-0 (1-0)
+21:00 Gamma FC (GER) v Delta FC (ITA) 1-1 (0-0)
+
+▪ League, Matchday 2
+
+Tue Sep 8 2026
+18:45 Beta FC (ESP) v Gamma FC (GER) 0-1 (0-0)
+21:00 Delta FC (ITA) v Alpha FC (ENG) 3-2 (1-1)
