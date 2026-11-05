@@ -15,6 +15,12 @@ dependencies = ["numpy>=1.26,<3"]
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
 
+[project.scripts]
+champions-path-calibrate = "champions_path.calibration:main"
+
+[tool.setuptools.package-data]
+champions_path = ["calibrated_params.json"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

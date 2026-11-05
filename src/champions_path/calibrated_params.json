@@ -1,0 +1,26 @@
+{
+  "model_version": "v4-calibrated",
+  "training_season": "2024-25",
+  "validation_season": "2025-26",
+  "selection_objective": "log_loss_plus_brier",
+  "parameters": {
+    "home_advantage": 55.0,
+    "k_factor": 32.0,
+    "total_goals": 3.3,
+    "margin_weight": 0.55
+  },
+  "training_metrics": {
+    "matches": 144,
+    "log_loss": 0.9267158357934766,
+    "brier_score": 0.18214778907225432,
+    "accuracy": 0.6041666666666666
+  },
+  "validation_metrics": {
+    "matches": 144,
+    "log_loss": 0.9646400321706393,
+    "brier_score": 0.18976796785603345,
+    "accuracy": 0.5555555555555556
+  },
+  "candidates_evaluated": 144,
+  "carryover_shrinkage": 0.75
+}
