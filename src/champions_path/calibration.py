@@ -8,6 +8,7 @@ from pathlib import Path
 
 from champions_path.data import load_historical_season, project_root
 from champions_path.domain import HistoricalMatch
+from champions_path.probability import outcome_probabilities_from_means
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,7 @@ class Parameters:
     k_factor: float
     total_goals: float
     margin_weight: float
+    dixon_coles_rho: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,34 +28,12 @@ class Metrics:
     accuracy: float
 
 
-def poisson_probabilities(mean: float, maximum: int = 10) -> list[float]:
-    probabilities = [math.exp(-mean)]
-    for goals in range(1, maximum + 1):
-        probabilities.append(probabilities[-1] * mean / goals)
-    probabilities[-1] += max(0.0, 1.0 - sum(probabilities))
-    return probabilities
-
-
 def outcome_probabilities(home_rating: float, away_rating: float, parameters: Parameters) -> tuple[float, float, float]:
     gap = home_rating + parameters.home_advantage - away_rating
     ratio = 10 ** (gap / 400)
     home_mean = parameters.total_goals * ratio / (1 + ratio)
     away_mean = parameters.total_goals / (1 + ratio)
-    home_goals = poisson_probabilities(home_mean)
-    away_goals = poisson_probabilities(away_mean)
-
-    home_win = draw = away_win = 0.0
-    for home_score, home_probability in enumerate(home_goals):
-        for away_score, away_probability in enumerate(away_goals):
-            probability = home_probability * away_probability
-            if home_score > away_score:
-                home_win += probability
-            elif home_score == away_score:
-                draw += probability
-            else:
-                away_win += probability
-    total = home_win + draw + away_win
-    return home_win / total, draw / total, away_win / total
+    return outcome_probabilities_from_means(home_mean, away_mean, parameters.dixon_coles_rho)
 
 
 def update_ratings(ratings: dict[str, float], match: HistoricalMatch, parameters: Parameters) -> None:
@@ -73,6 +53,15 @@ def evaluate(
     parameters: Parameters,
     initial_ratings: dict[str, float] | None = None,
 ) -> tuple[Metrics, dict[str, float]]:
+    metrics, ratings, _ = evaluate_detailed(matches, parameters, initial_ratings)
+    return metrics, ratings
+
+
+def evaluate_detailed(
+    matches: list[HistoricalMatch],
+    parameters: Parameters,
+    initial_ratings: dict[str, float] | None = None,
+) -> tuple[Metrics, dict[str, float], list[tuple[HistoricalMatch, tuple[float, float, float]]]]:
     teams = {match.home for match in matches} | {match.away for match in matches}
     ratings = defaultdict(lambda: 1500.0)
     if initial_ratings:
@@ -82,6 +71,7 @@ def evaluate(
 
     log_loss = brier = 0.0
     correct = 0
+    all_predictions: list[tuple[HistoricalMatch, tuple[float, float, float]]] = []
     matchdays = sorted({match.matchday for match in matches})
     for matchday in matchdays:
         current = [match for match in matches if match.matchday == matchday]
@@ -89,6 +79,7 @@ def evaluate(
         for match in current:
             probabilities = outcome_probabilities(ratings[match.home], ratings[match.away], parameters)
             predictions.append((match, probabilities))
+            all_predictions.append((match, probabilities))
             actual = match.outcome
             log_loss -= math.log(max(1e-12, probabilities[actual]))
             targets = (1.0 if actual == 0 else 0.0, 1.0 if actual == 1 else 0.0, 1.0 if actual == 2 else 0.0)
@@ -100,13 +91,11 @@ def evaluate(
 
     count = len(matches)
     metrics = Metrics(count, log_loss / count, brier / count, correct / count)
-    return metrics, dict(ratings)
+    return metrics, dict(ratings), all_predictions
 
 
-def calibrate() -> dict[str, object]:
-    training = load_historical_season("2024-25")
-    validation = load_historical_season("2025-26")
-    candidates = [
+def structural_candidates() -> list[Parameters]:
+    return [
         Parameters(*values)
         for values in itertools.product(
             (40.0, 55.0, 70.0, 85.0),
@@ -116,25 +105,49 @@ def calibrate() -> dict[str, object]:
         )
     ]
 
+
+def calibrate() -> dict[str, object]:
+    training = load_historical_season("2024-25")
+    validation = load_historical_season("2025-26")
+    candidates = structural_candidates()
+
     scored: list[tuple[float, Parameters, Metrics, dict[str, float]]] = []
     for parameters in candidates:
         metrics, ratings = evaluate(training, parameters)
         score = metrics.log_loss + metrics.brier_score
         scored.append((score, parameters, metrics, ratings))
-    _, best, training_metrics, end_ratings = min(scored, key=lambda item: item[0])
+    _, base_best, _, _ = min(scored, key=lambda item: item[0])
+
+    # Tune the single Dixon-Coles parameter only after the structural grid is
+    # selected. This avoids multiplying the full search space on a small sample.
+    rho_candidates = (-0.12, -0.08, -0.04, 0.0)
+    rho_scored: list[tuple[float, Parameters, Metrics, dict[str, float]]] = []
+    for rho in rho_candidates:
+        parameters = Parameters(
+            base_best.home_advantage,
+            base_best.k_factor,
+            base_best.total_goals,
+            base_best.margin_weight,
+            rho,
+        )
+        metrics, ratings = evaluate(training, parameters)
+        rho_scored.append((metrics.log_loss + metrics.brier_score, parameters, metrics, ratings))
+    _, best, training_metrics, end_ratings = min(rho_scored, key=lambda item: item[0])
 
     # Regress last season's ratings toward the mean before the unseen season.
     carried = {team: 1500 + 0.75 * (rating - 1500) for team, rating in end_ratings.items()}
     validation_metrics, _ = evaluate(validation, best, carried)
     return {
-        "model_version": "v4-calibrated",
+        "model_version": "v5-bayesian",
         "training_season": "2024-25",
         "validation_season": "2025-26",
         "selection_objective": "log_loss_plus_brier",
         "parameters": asdict(best),
         "training_metrics": asdict(training_metrics),
         "validation_metrics": asdict(validation_metrics),
-        "candidates_evaluated": len(candidates),
+        "candidates_evaluated": len(candidates) + len(rho_candidates),
+        "structural_candidates": len(candidates),
+        "dixon_coles_candidates": list(rho_candidates),
         "carryover_shrinkage": 0.75,
     }
 

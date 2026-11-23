@@ -7,7 +7,7 @@
 Reproducible Monte Carlo forecasts for the UEFA Champions League league phase
 and complete knockout path.
 
-> **Current model:** `v4-calibrated`
+> **Current model:** `v5-bayesian`
 >
 > **Forecast snapshot:** 2026/27 after league-phase matchday 4
 >
@@ -28,8 +28,10 @@ reporting precision.
 ### Calibrated match layer
 
 The match model is calibrated on all 144 league-phase matches from 2024/25.
-Candidate parameters are selected by minimising `log loss + Brier score`, then
-evaluated without retuning on all 144 matches from 2025/26.
+Structural parameters are selected by minimising `log loss + Brier score`.
+Dixon-Coles rho is selected in a separate, four-value search so it does not
+multiply the structural grid on a small dataset. The final model is evaluated
+without retuning on all 144 matches from 2025/26.
 
 | Parameter | Selected value |
 |---|---:|
@@ -37,21 +39,24 @@ evaluated without retuning on all 144 matches from 2025/26.
 | Elo K-factor | 32 |
 | Expected total goals | 3.3 |
 | Margin-of-victory weight | 0.55 |
+| Dixon-Coles rho | 0.00 |
 
 Forecasts for every match in a matchday are calculated before the model learns
 any result from that matchday. This prevents within-matchday future leakage.
 
 ### Current-season power layer
 
-The 2026/27 snapshot combines 50% current Champions League form, 30% preseason
-strength and 20% five-season UEFA coefficient history. Attack and defence form
-are shrunk toward the competition average so four games cannot dominate the
-prior. Each tournament simulation also draws persistent uncertainty for team
-strength, attack and defence.
+The 2026/27 snapshot combines current Champions League form, preseason strength
+and five-season UEFA coefficient history with a precision-weighted Bayesian
+blend. Form uncertainty falls as matches accumulate: early forecasts rely more
+on priors, while later forecasts can learn more from current form. At matchday 4
+the weights remain close to the former 50/30/20 heuristic. Attack and defence
+form are also shrunk toward the competition average.
 
 ### Match and knockout simulation
 
-- correlated Poisson score generation;
+- correlated Poisson score generation with an optional Dixon-Coles low-score
+  correction;
 - calibrated home advantage and goal environment;
 - UEFA paired-position playoff and round-of-16 paths;
 - two-legged ties, extra time and penalties;
@@ -63,10 +68,17 @@ tie-break inputs are not fully represented by the score-only model.
 
 ## Backtest results
 
-| Dataset | Matches | Log loss | Brier score | Accuracy |
+| Model | Matches | Log loss | Brier score | Accuracy |
 |---|---:|---:|---:|---:|
-| 2024/25 training | 144 | 0.9267 | 0.1821 | 60.4% |
-| 2025/26 validation | 144 | 0.9646 | 0.1898 | 55.6% |
+| Uniform baseline | 144 | 1.0986 | 0.2222 | 49.3% |
+| Historical-frequency baseline | 144 | 1.0271 | 0.2064 | 49.3% |
+| Raw Elo baseline | 144 | 0.9989 | 0.1986 | 50.7% |
+| Calibrated model | 144 | 0.9667 | 0.1899 | 55.6% |
+
+Against raw Elo on the untouched 2025/26 season, the calibrated model improves
+log loss by 3.2% and Brier score by 4.3%. The repository also reports paired
+matchday-bootstrap intervals and a rolling-origin selection result instead of
+presenting point estimates alone.
 
 Accuracy is included for readability, but parameter selection uses proper
 probabilistic scoring rules rather than accuracy.
@@ -86,25 +98,69 @@ On Windows PowerShell use `.venv\Scripts\Activate.ps1`.
 ## Run a forecast
 
 ```bash
-CHAMPIONS_PATH_OUTPUT=forecast.csv python -m champions_path.simulation
+champions-path simulate --sims 300000 --seed 20261106 --output forecast.csv
 ```
 
-| Variable | Default | Description |
-|---|---:|---|
-| `CHAMPIONS_PATH_SIMS` | `300000` | Number of tournament simulations |
-| `CHAMPIONS_PATH_SEED` | `20261106` | Reproducible random seed |
-| `CHAMPIONS_PATH_OUTPUT` | unset | Optional CSV output path |
+Generate presentation-friendly output at the same time:
 
-For a quick run, set `CHAMPIONS_PATH_SIMS=10000`.
+```bash
+champions-path simulate --output forecast.csv \
+  --markdown reports/forecast.md --html reports/forecast.html
+```
+
+| Option | Default | Description |
+|---|---:|---|
+| `--sims` | `300000` | Number of tournament simulations |
+| `--seed` | `20261106` | Reproducible random seed |
+| `--power-model` | `bayesian` | `bayesian` or legacy `fixed` blend |
+| `--dixon-coles-rho` | calibrated | Override the fitted low-score correction |
+| `--form-snapshot` | unset | Optional uniform domestic/xG snapshot |
+
+The former `CHAMPIONS_PATH_*` environment variables remain supported for
+backward compatibility. For a quick run, pass `--sims 10000`.
 
 ## Reproduce calibration
 
 ```bash
-python -m champions_path.calibration
+champions-path calibrate
 ```
 
-This evaluates 144 parameter combinations on 2024/25 and overwrites the bundled
-calibration report. The 2025/26 season is used only for out-of-sample reporting.
+This evaluates 144 structural combinations and four sequential Dixon-Coles
+candidates on 2024/25. The 2025/26 season is used only for out-of-sample
+reporting.
+
+## Compare baselines and calibration
+
+```bash
+champions-path backtest
+```
+
+This creates JSON, Markdown and HTML reports plus an SVG reliability plot under
+`reports/`. Baselines include uniform probabilities, historical outcome
+frequencies and a raw, untuned Elo model. Hyperparameter stability is checked
+with rolling-origin matchday folds, and uncertainty with paired block bootstrap.
+
+## Optional domestic-form/xG snapshot
+
+External features are opt-in because the project does not fabricate missing xG.
+A snapshot must include exactly the same 36 teams and provenance metadata:
+
+```json
+{
+  "provider": "licensed-provider-or-open-source-name",
+  "as_of": "2026-11-23",
+  "teams": {
+    "Arsenal": {
+      "domestic_elo_delta": 42.0,
+      "xg_difference_per_90": 0.71,
+      "matches": 12
+    }
+  }
+}
+```
+
+Partial coverage is rejected to prevent stronger data coverage in one domestic
+league from silently biasing the tournament forecast.
 
 ## Test
 
@@ -122,7 +178,13 @@ and total championship probability mass.
 data/historical/                   CC0 historical match snapshots
 src/champions_path/data.py         Historical-data parser
 src/champions_path/domain.py       Typed historical match model
-src/champions_path/calibration.py  Time-ordered calibration and backtest
+src/champions_path/calibration.py  Time-ordered parameter calibration
+src/champions_path/backtest.py     Baselines, rolling CV and bootstrap
+src/champions_path/probability.py  Correlated Poisson and Dixon-Coles
+src/champions_path/ratings.py      Bayesian power blending
+src/champions_path/features.py     Optional form/xG snapshot contract
+src/champions_path/reporting.py    Markdown, HTML and SVG reports
+src/champions_path/cli.py          Command-line interface
 src/champions_path/simulation.py   League and knockout simulation
 tests/                             Calibration and simulation invariants
 ```
@@ -138,12 +200,13 @@ upstream page changes.
 
 ## Known limitations
 
-- Uniform xG, injury, suspension, expected-lineup and domestic-form data are not
-  yet included.
+- Uniform xG and domestic-form data are not bundled; the optional adapter rejects
+  incomplete team coverage.
+- Injury, suspension and expected-lineup data are not yet included.
 - Preseason ratings are model inputs rather than outputs of this repository.
 - Only two completed seasons exist under the 36-team league-phase format.
-- The current-season 50/30/20 power blend is not independently calibrated; v4
-  calibrates the match layer, home advantage, goals and Elo updates.
+- Bayesian blend variance assumptions are documented heuristics until more
+  completed seasons are available for direct calibration.
 - Squad changes can make five-season coefficients slow to reflect current team
   quality.
 
@@ -152,11 +215,12 @@ their impact, but is not a replacement for complete data.
 
 ## Roadmap
 
-- calibrate the preseason/current-form/history blend as more seasons arrive;
+- calibrate Bayesian prior variances as more seasons arrive;
 - add licensed, uniformly available xG and domestic-form adapters;
 - add optional injury and suspension snapshots;
 - automate result ingestion while retaining immutable snapshots;
-- publish forecast comparisons and confidence intervals.
+- add bookmaker-implied probabilities only if a legal reproducible snapshot is
+  available.
 
 ## Disclaimer
 

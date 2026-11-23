@@ -9,6 +9,7 @@ def test_probability_invariants(tmp_path):
     env = os.environ.copy()
     env["CHAMPIONS_PATH_SIMS"] = "1000"
     env["CHAMPIONS_PATH_OUTPUT"] = str(output)
+    env["CHAMPIONS_PATH_POWER_MODEL"] = "bayesian"
     subprocess.run(
         [sys.executable, "-m", "champions_path.simulation"],
         check=True,

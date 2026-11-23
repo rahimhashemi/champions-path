@@ -5,6 +5,9 @@ from pathlib import Path
 
 import numpy as np
 
+from champions_path.ratings import bayesian_power_rating, blend_weights
+from champions_path.features import load_form_snapshot
+
 
 CALIBRATION = json.loads(
     (Path(__file__).with_name("calibrated_params.json")).read_text(encoding="utf-8")
@@ -13,6 +16,7 @@ CALIBRATED_HOME_ADVANTAGE = float(CALIBRATION["home_advantage"])
 CALIBRATED_K_FACTOR = float(CALIBRATION["k_factor"])
 CALIBRATED_TOTAL_GOALS = float(CALIBRATION["total_goals"])
 CALIBRATED_MARGIN_WEIGHT = float(CALIBRATION["margin_weight"])
+CALIBRATED_DIXON_COLES_RHO = float(CALIBRATION.get("dixon_coles_rho", 0.0))
 
 E={'PSG':1953,'Bayern':2045,'Real Madrid':1973,'Liverpool':1931,'Inter':1945,'Man City':2028,'Arsenal':2039,'Barcelona':2017,'Atletico':1888,'Dortmund':1894,'Roma':1852,'Sporting':1882,'Aston Villa':1891,'Porto':1827,'Man United':1888,'Club Brugge':1802,'Real Betis':1811,'PSV':1790,'Feyenoord':1707,'Lille':1784,'Bodo':1786,'Napoli':1832,'Leipzig':1818,'Villarreal':1795,'Fenerbahce':1778,'Shakhtar':1685,'Galatasaray':1805,'Slavia':1756,'Slovan':1555,'Stuttgart':1831,'AEK':1707,'LASK':1644,'Como':1815,'Lens':1822,'Viking':1687,'Sabah':1561}
 PRESEASON=E.copy()
@@ -203,11 +207,20 @@ for (h,a),(hg,ag) in md4.items():
 fixed.update(md4)
 
 # Form-aware rating rebuild. Start from the pre-tournament rating and replay all
-# four matchdays in order. Recent rounds get moderately larger K values and the
-# update is scaled by margin of victory (capped to prevent one result dominating).
+# completed matchdays in order. Recent rounds get moderately larger K values and
+# the update is scaled by margin of victory (capped to prevent one result dominating).
 E=PRESEASON.copy()
-round_k_factors=tuple(CALIBRATED_K_FACTOR*scale for scale in (0.625,0.75,0.9375,1.125))
-for round_results,k in zip((md1,md2,md3,md4),round_k_factors):
+PLAYED_ROUNDS=(md1,md2,md3,md4)
+MATCHES_PLAYED=len(PLAYED_ROUNDS)
+recent_scales=(0.625,0.75,0.9375,1.125)
+if MATCHES_PLAYED<=len(recent_scales):
+ round_scales=recent_scales[:MATCHES_PLAYED]
+else:
+ older_count=MATCHES_PLAYED-len(recent_scales)
+ older_scales=tuple(0.5*0.85**distance for distance in range(older_count-1,-1,-1))
+ round_scales=older_scales+recent_scales
+round_k_factors=tuple(CALIBRATED_K_FACTOR*scale for scale in round_scales)
+for round_results,k in zip(PLAYED_ROUNDS,round_k_factors):
  for (h,a),(hg,ag) in round_results.items():
   expected=1/(1+10**(-(E[h]+65-E[a])/400))
   actual=1.0 if hg>ag else (0.5 if hg==ag else 0.0)
@@ -215,16 +228,16 @@ for round_results,k in zip((md1,md2,md3,md4),round_k_factors):
   delta=k*margin*(actual-expected)
   E[h]+=delta; E[a]-=delta
 
-# Attack/defence form from the four UCL games, shrunk toward the tournament
-# average by six prior-match equivalents so that four games cannot dominate.
+# Attack/defence form from completed UCL games, shrunk toward the tournament
+# average by six prior-match equivalents so a short run cannot dominate.
 gf_obs={t:0 for t in E}; ga_obs={t:0 for t in E}
 for (h,a),(hg,ag) in fixed.items():
  gf_obs[h]+=hg; ga_obs[h]+=ag; gf_obs[a]+=ag; ga_obs[a]+=hg
 observed_total=sum(gf_obs.values())/len(fixed)
 base_total=0.55*CALIBRATED_TOTAL_GOALS+0.45*observed_total
 mu=observed_total/2; prior_matches=6
-attack={t:((gf_obs[t]+prior_matches*mu)/(4+prior_matches))/mu for t in E}
-defence={t:((ga_obs[t]+prior_matches*mu)/(4+prior_matches))/mu for t in E}
+attack={t:((gf_obs[t]+prior_matches*mu)/(MATCHES_PLAYED+prior_matches))/mu for t in E}
+defence={t:((ga_obs[t]+prior_matches*mu)/(MATCHES_PLAYED+prior_matches))/mu for t in E}
 for t in E:
  attack[t]=float(np.clip(attack[t],0.72,1.45))
  defence[t]=float(np.clip(defence[t],0.72,1.45))
@@ -245,16 +258,33 @@ COEFF5={'Bayern':147.500,'Real Madrid':144.500,'PSG':132.000,'Liverpool':130.000
 assert set(COEFF5)==set(E)
 HISTORY={t:float(np.clip(1700+2.5*COEFF5[t],1660,2080)) for t in E}
 
-# Separate current-form rating from long-run strength, then blend them. Recent
-# UCL form gets 50%, preseason team strength 30%, and five-season Europe 20%.
+# Separate current-form rating from long-run strength, then blend them. The
+# Bayesian blend reduces form uncertainty as matches accumulate. At matchday 4
+# it stays close to the former 50/30/20 heuristic, while avoiding the same form
+# weight at matchdays 1 and 7. Set CHAMPIONS_PATH_POWER_MODEL=fixed to reproduce
+# the legacy blend exactly.
 FORM={t:PRESEASON[t]+1.60*(E[t]-PRESEASON[t])+85*np.log(attack[t]/defence[t]) for t in E}
-POWER={t:0.30*PRESEASON[t]+0.20*HISTORY[t]+0.50*FORM[t] for t in E}
+FORM_SNAPSHOT_PATH=os.getenv('CHAMPIONS_PATH_FORM_SNAPSHOT')
+if FORM_SNAPSHOT_PATH:
+ form_snapshot=load_form_snapshot(Path(FORM_SNAPSHOT_PATH),set(E))
+ FORM={t:FORM[t]+form_snapshot.teams[t].rating_adjustment for t in E}
+POWER_MODEL=os.getenv('CHAMPIONS_PATH_POWER_MODEL','bayesian')
+if POWER_MODEL=='fixed':
+ POWER={t:0.30*PRESEASON[t]+0.20*HISTORY[t]+0.50*FORM[t] for t in E}
+elif POWER_MODEL=='bayesian':
+ POWER={t:bayesian_power_rating(PRESEASON[t],HISTORY[t],FORM[t],MATCHES_PLAYED) for t in E}
+else:
+ raise ValueError(f'Unsupported power model: {POWER_MODEL}')
+POWER_WEIGHTS=blend_weights(MATCHES_PLAYED) if POWER_MODEL=='bayesian' else (0.30,0.20,0.50)
 ATT=np.array([attack[t] for t in E]); DEF=np.array([defence[t] for t in E])
 
 T=list(E); ix={t:i for i,t in enumerate(T)}
 N=int(os.getenv('CHAMPIONS_PATH_SIMS','300000'))
 bs=min(10_000,N)
 rng=np.random.default_rng(int(os.getenv('CHAMPIONS_PATH_SEED','20261106'))); out=np.zeros((36,3),int); stages=np.zeros((36,5),int); ps=np.zeros(36); rs=np.zeros(36)
+DIXON_COLES_RHO=float(os.getenv('CHAMPIONS_PATH_DIXON_COLES_RHO',str(CALIBRATED_DIXON_COLES_RHO)))
+if not -0.20 <= DIXON_COLES_RHO <= 0.20:
+ raise ValueError('CHAMPIONS_PATH_DIXON_COLES_RHO must be between -0.20 and 0.20')
 for z in range(0,N,bs):
  n=min(bs,N-z); p=np.zeros((n,36),np.int16); gd=np.zeros_like(p); gf=np.zeros_like(p)
  # Parameter uncertainty: one persistent team-strength and attack/defence draw
@@ -274,8 +304,37 @@ for z in range(0,N,bs):
   # A small shared component allows correlated scorelines versus independent
   # Poisson goals, while retaining the fitted marginal means.
   shared_mean=np.minimum(0.10*factor,np.minimum(lh,la)*0.35)
-  shared=rng.poisson(shared_mean)
-  return rng.poisson(np.maximum(0.01,lh-shared_mean))+shared, rng.poisson(np.maximum(0.01,la-shared_mean))+shared
+
+  def draw_scores():
+   shared=rng.poisson(shared_mean)
+   return (rng.poisson(np.maximum(0.01,lh-shared_mean))+shared,
+           rng.poisson(np.maximum(0.01,la-shared_mean))+shared)
+
+  if DIXON_COLES_RHO==0:
+   return draw_scores()
+
+  # Exact accept/reject reweighting of the four low-score cells. The proposal
+  # remains the correlated-Poisson sampler above; rejection rates are small for
+  # the calibrated rho range and the operation stays vectorised by batch.
+  result_home=np.empty(n,dtype=np.int16); result_away=np.empty(n,dtype=np.int16)
+  pending=np.ones(n,dtype=bool)
+  tau00=1-lh*la*DIXON_COLES_RHO
+  tau01=1+lh*DIXON_COLES_RHO
+  tau10=1+la*DIXON_COLES_RHO
+  tau11=1-DIXON_COLES_RHO
+  maximum_tau=np.maximum.reduce((np.ones(n),tau00,tau01,tau10,tau11))
+  while np.any(pending):
+   candidate_home,candidate_away=draw_scores()
+   tau=np.ones(n)
+   tau=np.where((candidate_home==0)&(candidate_away==0),tau00,tau)
+   tau=np.where((candidate_home==0)&(candidate_away==1),tau01,tau)
+   tau=np.where((candidate_home==1)&(candidate_away==0),tau10,tau)
+   tau=np.where((candidate_home==1)&(candidate_away==1),tau11,tau)
+   accepted=pending & (rng.random(n)<np.maximum(0,tau)/maximum_tau)
+   result_home[accepted]=candidate_home[accepted]
+   result_away[accepted]=candidate_away[accepted]
+   pending[accepted]=False
+  return result_home,result_away
 
  for h,a in games:
   if (h,a) in fixed: hg=np.full(n,fixed[h,a][0]); ag=np.full(n,fixed[h,a][1])
