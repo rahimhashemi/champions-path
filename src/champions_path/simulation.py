@@ -206,11 +206,16 @@ for (h,a),(hg,ag) in md4.items():
  E[h]+=delta; E[a]-=delta
 fixed.update(md4)
 
+# Matchday 5 official results (24-25 November 2026).
+md5={("Bodo","LASK"):(1,0),("Galatasaray","Aston Villa"):(1,0),("Arsenal","Dortmund"):(1,1),("Como","AEK"):(1,0),("Feyenoord","Porto"):(0,1),("Man City","Napoli"):(2,2),("Leipzig","Lens"):(3,1),("Real Madrid","PSV"):(5,1),("Slovan","Real Betis"):(0,2),
+("Sabah","Barcelona"):(1,4),("Slavia","Villarreal"):(0,1),("Atletico","Viking"):(2,0),("Club Brugge","Liverpool"):(0,3),("Inter","Stuttgart"):(2,0),("Shakhtar","Fenerbahce"):(0,1),("Lille","Bayern"):(2,1),("PSG","Roma"):(2,2),("Sporting","Man United"):(2,2)}
+fixed.update(md5)
+
 # Form-aware rating rebuild. Start from the pre-tournament rating and replay all
 # completed matchdays in order. Recent rounds get moderately larger K values and
 # the update is scaled by margin of victory (capped to prevent one result dominating).
 E=PRESEASON.copy()
-PLAYED_ROUNDS=(md1,md2,md3,md4)
+PLAYED_ROUNDS=(md1,md2,md3,md4,md5)
 MATCHES_PLAYED=len(PLAYED_ROUNDS)
 recent_scales=(0.625,0.75,0.9375,1.125)
 if MATCHES_PLAYED<=len(recent_scales):

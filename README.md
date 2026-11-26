@@ -9,7 +9,7 @@ and complete knockout path.
 
 > **Current model:** `v5-bayesian`
 >
-> **Forecast snapshot:** 2026/27 after league-phase matchday 4
+> **Forecast snapshot:** 2026/27 after league-phase matchday 5
 >
 > **Historical training:** 2024/25 league phase
 >
