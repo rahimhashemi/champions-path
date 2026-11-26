@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "champions-path"
-version = "0.1.0"
+version = "0.2.0"
 description = "Monte Carlo forecasts for the UEFA Champions League league phase and knockout path"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,7 @@ dependencies = ["numpy>=1.26,<3"]
 dev = ["pytest>=8,<9"]
 
 [project.scripts]
+champions-path = "champions_path.cli:main"
 champions-path-calibrate = "champions_path.calibration:main"
 
 [tool.setuptools.package-data]
