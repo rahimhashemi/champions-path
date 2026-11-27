@@ -7,7 +7,7 @@ def _percentage(value: str | float) -> str:
     return f"{float(value):.1f}%"
 
 
-def write_forecast_markdown(csv_path: Path, output_path: Path) -> None:
+def write_forecast_markdown(csv_path: Path, output_path: Path, competition: str = "ucl") -> None:
     with csv_path.open(encoding="utf-8") as input_file:
         rows = list(csv.DictReader(input_file))
     headers = (
@@ -34,7 +34,8 @@ def write_forecast_markdown(csv_path: Path, output_path: Path) -> None:
         "final_pct",
         "champion_pct",
     )
-    lines = ["# Champions Path forecast", "", "| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
+    competition_name = "Champions League" if competition == "ucl" else "Europa League"
+    lines = [f"# {competition_name} forecast", "", "| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
     for row in rows:
         values = [row[key] if key in ("team", "expected_points") else _percentage(row[key]) for key in keys]
         lines.append("| " + " | ".join(values) + " |")
@@ -42,7 +43,7 @@ def write_forecast_markdown(csv_path: Path, output_path: Path) -> None:
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_forecast_html(csv_path: Path, output_path: Path) -> None:
+def write_forecast_html(csv_path: Path, output_path: Path, competition: str = "ucl") -> None:
     with csv_path.open(encoding="utf-8") as input_file:
         rows = list(csv.DictReader(input_file))
     columns = (
@@ -65,11 +66,12 @@ def write_forecast_html(csv_path: Path, output_path: Path) -> None:
             value = row[key] if key in ("team", "expected_points") else _percentage(row[key])
             cells.append(f"<td>{html.escape(value)}</td>")
         body.append("<tr>" + "".join(cells) + "</tr>")
+    competition_name = "Champions League" if competition == "ucl" else "Europa League"
     document = f"""<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Champions Path forecast</title>
+<title>{competition_name} forecast</title>
 <style>body{{font:14px system-ui;margin:2rem;background:#0b1020;color:#e8ecf6}}table{{border-collapse:collapse;width:100%;background:#131a2d}}th,td{{padding:.65rem;border-bottom:1px solid #2b3550;text-align:right}}th:first-child,td:first-child{{text-align:left}}th{{position:sticky;top:0;background:#1c2742}}tr:hover{{background:#19233b}}</style>
-<h1>Champions Path forecast</h1><table><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></html>"""
+<h1>{competition_name} forecast</h1><table><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></html>"""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(document, encoding="utf-8")
 

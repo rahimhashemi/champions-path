@@ -4,16 +4,31 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Reproducible Monte Carlo forecasts for the UEFA Champions League league phase
-and complete knockout path.
+Reproducible Monte Carlo forecasts for the UEFA Champions League and Europa
+League league phases and their complete knockout paths.
 
-> **Current model:** `v5-bayesian`
->
-> **Forecast snapshot:** 2026/27 after league-phase matchday 5
->
-> **Historical training:** 2024/25 league phase
->
-> **Out-of-sample validation:** 2025/26 league phase
+| Competition | Snapshot | Model status | Included report |
+|---|---|---|---|
+| Champions League (`ucl`) | 2026/27 after Matchday 5 | Backtested `v5-bayesian` | [`reports/forecast.md`](reports/forecast.md) |
+| Europa League (`uel`) | 2026/27 after Matchday 5 | Provisional UEL adapter | [`reports/europa_forecast.md`](reports/europa_forecast.md) |
+
+The Champions League match layer was trained on the 2024/25 league phase and
+validated without retuning on 2025/26. Europa League support uses the same
+tournament engine with an independent schedule, results, preseason-strength
+snapshot and UEFA coefficients. Its match-layer parameters remain provisional
+until a dedicated UEL backtest is added.
+
+## Quick start
+
+```bash
+python -m pip install -e ".[dev]"
+
+# Champions League
+champions-path simulate --competition ucl --sims 300000 --output ucl.csv
+
+# Europa League
+champions-path simulate --competition uel --sims 300000 --output uel.csv
+```
 
 ## What it reports
 
@@ -46,12 +61,12 @@ any result from that matchday. This prevents within-matchday future leakage.
 
 ### Current-season power layer
 
-The 2026/27 snapshot combines current Champions League form, preseason strength
-and five-season UEFA coefficient history with a precision-weighted Bayesian
-blend. Form uncertainty falls as matches accumulate: early forecasts rely more
-on priors, while later forecasts can learn more from current form. At matchday 4
-the weights remain close to the former 50/30/20 heuristic. Attack and defence
-form are also shrunk toward the competition average.
+Each 2026/27 competition snapshot combines current European form, preseason
+strength and five-season UEFA coefficient history with a precision-weighted
+Bayesian blend. Form uncertainty falls as matches accumulate: early forecasts
+rely more on priors, while later forecasts learn more from current form. Attack
+and defence estimates are shrunk toward the competition average so five matches
+cannot dominate the long-run strength signal.
 
 ### Match and knockout simulation
 
@@ -98,7 +113,16 @@ On Windows PowerShell use `.venv\Scripts\Activate.ps1`.
 ## Run a forecast
 
 ```bash
-champions-path simulate --sims 300000 --seed 20261106 --output forecast.csv
+champions-path simulate --competition ucl --sims 300000 --seed 20261106 \
+  --output forecast.csv
+```
+
+Run the Europa League snapshot after Matchday 5:
+
+```bash
+champions-path simulate --competition uel --sims 300000 --seed 20261127 \
+  --output europa.csv --markdown reports/europa_forecast.md \
+  --html reports/europa_forecast.html
 ```
 
 Generate presentation-friendly output at the same time:
@@ -112,6 +136,7 @@ champions-path simulate --output forecast.csv \
 |---|---:|---|
 | `--sims` | `300000` | Number of tournament simulations |
 | `--seed` | `20261106` | Reproducible random seed |
+| `--competition` | `ucl` | `ucl` or `uel` |
 | `--power-model` | `bayesian` | `bayesian` or legacy `fixed` blend |
 | `--dixon-coles-rho` | calibrated | Override the fitted low-score correction |
 | `--form-snapshot` | unset | Optional uniform domestic/xG snapshot |
@@ -126,8 +151,8 @@ champions-path calibrate
 ```
 
 This evaluates 144 structural combinations and four sequential Dixon-Coles
-candidates on 2024/25. The 2025/26 season is used only for out-of-sample
-reporting.
+candidates on the 2024/25 Champions League. The 2025/26 Champions League is
+used only for out-of-sample reporting. It does not yet calibrate UEL separately.
 
 ## Compare baselines and calibration
 
@@ -168,9 +193,9 @@ league from silently biasing the tournament forecast.
 python -m pytest -q
 ```
 
-Tests cover complete historical snapshots, probability partitions,
-deterministic backtesting, all 36 forecast teams, monotonic knockout-stage reach
-and total championship probability mass.
+Tests cover complete UCL and UEL snapshots, probability partitions,
+deterministic backtesting, all 36 teams in each competition, monotonic
+knockout-stage reach and total championship probability mass.
 
 ## Project structure
 
@@ -183,6 +208,7 @@ src/champions_path/backtest.py     Baselines, rolling CV and bootstrap
 src/champions_path/probability.py  Correlated Poisson and Dixon-Coles
 src/champions_path/ratings.py      Bayesian power blending
 src/champions_path/features.py     Optional form/xG snapshot contract
+src/champions_path/europa.py       Europa League teams, fixtures and results
 src/champions_path/reporting.py    Markdown, HTML and SVG reports
 src/champions_path/cli.py          Command-line interface
 src/champions_path/simulation.py   League and knockout simulation
@@ -191,9 +217,9 @@ tests/                             Calibration and simulation invariants
 
 ## Data provenance
 
-- Historical match snapshots: OpenFootball Champions League, CC0.
-- Competition results and format cross-check: UEFA.
-- Five-season coefficients: UEFA methodology and Kassiesa tables.
+- Historical match snapshots: [OpenFootball Champions League](https://github.com/openfootball/champions-league), CC0.
+- 2026/27 fixtures, results and format: [UEFA Champions League](https://www.uefa.com/uefachampionsleague/fixtures-results/) and [UEFA Europa League](https://www.uefa.com/uefaeuropaleague/fixtures-results/).
+- Five-season coefficients: [UEFA methodology](https://www.uefa.com/nationalassociations/uefarankings/club/about/) and [Kassiesa tables](https://kassiesa.net/uefa/data/method5/trank2026.html).
 
 Raw historical files are committed so calibration remains reproducible if an
 upstream page changes.
@@ -205,6 +231,8 @@ upstream page changes.
 - Injury, suspension and expected-lineup data are not yet included.
 - Preseason ratings are model inputs rather than outputs of this repository.
 - Only two completed seasons exist under the 36-team league-phase format.
+- Europa League currently reuses the UCL-calibrated match layer; its tournament
+  results are useful model estimates but not yet independently backtested.
 - Bayesian blend variance assumptions are documented heuristics until more
   completed seasons are available for direct calibration.
 - Squad changes can make five-season coefficients slow to reflect current team
@@ -215,6 +243,7 @@ their impact, but is not a replacement for complete data.
 
 ## Roadmap
 
+- add a dedicated historical UEL dataset and out-of-sample calibration;
 - calibrate Bayesian prior variances as more seasons arrive;
 - add licensed, uniformly available xG and domestic-form adapters;
 - add optional injury and suspension snapshots;
