@@ -25,6 +25,7 @@ def _simulate(arguments: argparse.Namespace) -> None:
         output = Path(temporary.name)
     os.environ["CHAMPIONS_PATH_SIMS"] = str(arguments.sims)
     os.environ["CHAMPIONS_PATH_SEED"] = str(arguments.seed)
+    os.environ["CHAMPIONS_PATH_COMPETITION"] = arguments.competition
     os.environ["CHAMPIONS_PATH_POWER_MODEL"] = arguments.power_model
     os.environ["CHAMPIONS_PATH_DIXON_COLES_RHO"] = str(arguments.dixon_coles_rho)
     if arguments.form_snapshot:
@@ -33,9 +34,9 @@ def _simulate(arguments: argparse.Namespace) -> None:
         os.environ["CHAMPIONS_PATH_OUTPUT"] = str(output)
     runpy.run_module("champions_path.simulation", run_name="__main__")
     if arguments.markdown:
-        write_forecast_markdown(output, arguments.markdown)
+        write_forecast_markdown(output, arguments.markdown, arguments.competition)
     if arguments.html:
-        write_forecast_html(output, arguments.html)
+        write_forecast_html(output, arguments.html, arguments.competition)
     if temporary:
         Path(temporary.name).unlink(missing_ok=True)
 
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     simulate = commands.add_parser("simulate", help="run the league and knockout Monte Carlo model")
     simulate.add_argument("--sims", type=int, default=300_000)
     simulate.add_argument("--seed", type=int, default=20_261_106)
+    simulate.add_argument("--competition", choices=("ucl", "uel"), default="ucl")
     simulate.add_argument("--output", type=Path)
     simulate.add_argument("--markdown", type=Path)
     simulate.add_argument("--html", type=Path)

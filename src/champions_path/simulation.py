@@ -8,6 +8,10 @@ import numpy as np
 from champions_path.ratings import bayesian_power_rating, blend_weights
 from champions_path.features import load_form_snapshot
 
+COMPETITION=os.getenv('CHAMPIONS_PATH_COMPETITION','ucl').lower()
+if COMPETITION not in {'ucl','uel'}:
+ raise ValueError('CHAMPIONS_PATH_COMPETITION must be ucl or uel')
+
 
 CALIBRATION = json.loads(
     (Path(__file__).with_name("calibrated_params.json")).read_text(encoding="utf-8")
@@ -211,11 +215,23 @@ md5={("Bodo","LASK"):(1,0),("Galatasaray","Aston Villa"):(1,0),("Arsenal","Dortm
 ("Sabah","Barcelona"):(1,4),("Slavia","Villarreal"):(0,1),("Atletico","Viking"):(2,0),("Club Brugge","Liverpool"):(0,3),("Inter","Stuttgart"):(2,0),("Shakhtar","Fenerbahce"):(0,1),("Lille","Bayern"):(2,1),("PSG","Roma"):(2,2),("Sporting","Man United"):(2,2)}
 fixed.update(md5)
 
+# Both competitions use the same 36-team league and knockout engine. Only the
+# competition snapshot (teams, schedule, results and priors) is swapped here.
+if COMPETITION=='uel':
+ from champions_path import europa
+ PRESEASON=europa.PRESEASON.copy()
+ E=PRESEASON.copy()
+ games=europa.GAMES
+ fixed=europa.FIXED.copy()
+ PLAYED_ROUNDS=europa.PLAYED_ROUNDS
+ COEFF5=europa.COEFFICIENTS.copy()
+else:
+ PLAYED_ROUNDS=(md1,md2,md3,md4,md5)
+
 # Form-aware rating rebuild. Start from the pre-tournament rating and replay all
 # completed matchdays in order. Recent rounds get moderately larger K values and
 # the update is scaled by margin of victory (capped to prevent one result dominating).
 E=PRESEASON.copy()
-PLAYED_ROUNDS=(md1,md2,md3,md4,md5)
 MATCHES_PLAYED=len(PLAYED_ROUNDS)
 recent_scales=(0.625,0.75,0.9375,1.125)
 if MATCHES_PLAYED<=len(recent_scales):
@@ -251,7 +267,8 @@ for t in E:
 # effective coefficient is the higher country-part value. The coefficient is
 # converted conservatively to an Elo-like history rating; it is only 20% of the
 # final blend, so European pedigree informs rather than overwhelms current form.
-COEFF5={'Bayern':147.500,'Real Madrid':144.500,'PSG':132.000,'Liverpool':130.000,
+if COMPETITION=='ucl':
+ COEFF5={'Bayern':147.500,'Real Madrid':144.500,'PSG':132.000,'Liverpool':130.000,
 'Inter':127.000,'Man City':125.500,'Arsenal':119.000,'Barcelona':113.250,
 'Atletico':104.750,'Dortmund':100.750,'Roma':97.750,'Sporting':84.000,
 'Aston Villa':83.000,'Porto':80.750,'Man United':76.500,'Club Brugge':75.250,

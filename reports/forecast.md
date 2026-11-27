@@ -1,4 +1,4 @@
-# Champions Path forecast
+# Champions League forecast
 
 | Team | Expected points | Top 8 | 9-24 | Eliminated | Round of 16 | Quarter-final | Semi-final | Final | Champion |
 |---|---|---|---|---|---|---|---|---|---|

@@ -3,13 +3,29 @@ import os
 import subprocess
 import sys
 
+import pytest
 
-def test_probability_invariants(tmp_path):
+from champions_path.europa import COEFFICIENTS, FIXED, GAMES, PLAYED_ROUNDS, PRESEASON
+
+
+def test_europa_snapshot_is_complete():
+    assert len(PRESEASON) == 36
+    assert set(PRESEASON) == set(COEFFICIENTS)
+    assert len(GAMES) == 144
+    assert len(set(GAMES)) == 144
+    assert len(PLAYED_ROUNDS) == 5
+    assert all(len(round_results) == 18 for round_results in PLAYED_ROUNDS)
+    assert len(FIXED) == 90
+
+
+@pytest.mark.parametrize("competition", ("ucl", "uel"))
+def test_probability_invariants(tmp_path, competition):
     output = tmp_path / "forecast.csv"
     env = os.environ.copy()
     env["CHAMPIONS_PATH_SIMS"] = "1000"
     env["CHAMPIONS_PATH_OUTPUT"] = str(output)
     env["CHAMPIONS_PATH_POWER_MODEL"] = "bayesian"
+    env["CHAMPIONS_PATH_COMPETITION"] = competition
     subprocess.run(
         [sys.executable, "-m", "champions_path.simulation"],
         check=True,
